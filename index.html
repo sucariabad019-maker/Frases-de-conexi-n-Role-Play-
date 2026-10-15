@@ -1025,6 +1025,14 @@ function cmpHTML(){
    '<p class="note">El cambio muestra reciente menos anterior. Verde: mejora. Rojo: retroceso. Los resultados de UPT solo son comparables si corresponden al mismo periodo.</p>';
 }
 function histScreen(){
+  try{return histScreenInner();}
+  catch(err){
+    console.error(err);H.open=null;H.cmp=false;H.store=null;H.cands=null;
+    H.msg={t:'err',s:'No se pudieron mostrar los registros de esa tienda (formato no compatible). Los datos siguen guardados sin modificar.'};
+    try{return histScreenInner();}catch(e2){return '<section class="wrap"><h1 class="h2">Seguimiento por tienda</h1><p class="note">No se pudo mostrar esta pantalla. Tus datos no se modificaron.</p></section>';}
+  }
+}
+function histScreenInner(){
   var h=loadHist(),o='<section class="wrap"><h1 class="h2">Seguimiento por tienda</h1>'+
    '<p class="note">Escribe el nombre o código de la tienda para ver sus evaluaciones. Los datos están únicamente en este navegador y dispositivo.</p>'+
    (STORE_OK?'':'<div class="fb no">'+I('alert',32)+'<div><h3>No se puede guardar</h3><p>Este navegador bloquea el almacenamiento (¿modo privado?).</p></div></div>')+
@@ -1034,7 +1042,14 @@ function histScreen(){
   if(H.store==null)return o+'</section>';
   var st=own(h.stores,H.store);
   if(!st||!st.evals.length){H.metas=[];return o+'<p class="lead">No hay evaluaciones guardadas para esa tienda.</p></section>';}
-  H.metas=st.evals.map(function(e){var m=evalMeta(e.snap);m.id=e.id;m.savedAt=e.savedAt;m.snap=e.snap;return m;});
+  H.metas=[];H.bad=0;
+  st.evals.forEach(function(e,ix){
+    try{
+      if(!e||typeof e!=='object'||!e.snap||typeof e.snap!=='object'||Array.isArray(e.snap)||!Object.keys(e.snap).length)throw 0;
+      var sn=normalize(e.snap),m=evalMeta(sn);
+      m.id=(typeof e.id==='string'&&e.id)?e.id:'sin-id-'+ix;m.savedAt=Number(e.savedAt)||0;m.snap=sn;H.metas.push(m);
+    }catch(_){H.bad++;}
+  });
   H.sel=H.sel.filter(function(id){return H.metas.some(function(m){return m.id===id;});});
   var rec=H.open?H.metas.filter(function(m){return m.id===H.open;})[0]:null;
   if(H.open&&!rec)H.open=null;
@@ -1062,7 +1077,7 @@ function histScreen(){
    ftxt('asesor','Colaborador')+fsel('puesto',PUESTOS,['Puesto','Todos'])+ftxt('lider','Evaluador')+fsel('cargo',CARGOS,['Cargo del evaluador','Todos'])+
    fdate('desde','Fecha desde')+fdate('hasta','Fecha hasta')+fsel('estado',ESTADOS,['Estado','Todos'])+'</div>'+
    '<div style="margin-top:14px"><button class="btn ghost sm" data-a="hclear">LIMPIAR FILTROS</button></div></div>';
-  return o+'<div class="lbl">'+esc(st.name)+' · '+H.metas.length+' evaluación(es)</div>'+kp+nxh+flt+'<div id="hlist">'+listHTML()+'</div>'+
+  return o+'<div class="lbl">'+esc(st.name)+' · '+H.metas.length+' evaluación(es)</div>'+(H.bad?'<p class="note" style="font-weight:600;color:var(--err)">'+H.bad+' registro(s) no se pudieron leer; siguen guardados sin modificar.</p>':'')+kp+nxh+flt+'<div id="hlist">'+listHTML()+'</div>'+
    bar('<button class="btn ghost" data-a="hcsv">'+I('doc',24)+'EXPORTAR CSV</button><button class="btn" data-a="hcmp"'+(H.sel.length===2?'':' disabled')+'>COMPARAR ('+H.sel.length+' / 2)</button>')+'</section>';
 }
 
@@ -1520,7 +1535,11 @@ var A={
    var b=(el&&el.tagName==='BUTTON')?el:document.querySelector('[data-a="hsearch"]');
    if(b){b.disabled=true;b.setAttribute('aria-busy','true');if(b.lastChild&&b.lastChild.nodeType===3)b.lastChild.nodeValue='BUSCANDO…';}
    var i=document.getElementById('hq'),q=i?i.value:'';
-   setTimeout(function(){H.busy=0;hdoSearch(q);},150);
+   setTimeout(function(){
+     try{hdoSearch(q);}
+     catch(err){console.error(err);H.store=null;H.cands=null;H.msg={t:'err',s:'No se pudo completar la búsqueda. Inténtalo de nuevo. Tus datos no se modificaron.'};try{render(true);}catch(e2){}}
+     finally{H.busy=0;var nb=document.querySelector('[data-a="hsearch"]');if(nb){nb.disabled=false;nb.removeAttribute('aria-busy');if(nb.lastChild&&nb.lastChild.nodeType===3)nb.lastChild.nodeValue='BUSCAR';}}
+   },150);
  },
  hpick:function(el){
    var st=own(loadHist().stores,el.dataset.v);if(!st)return;
