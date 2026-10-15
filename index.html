@@ -928,6 +928,38 @@ function summaryText(){
 }
 
 /* ---------- seguimiento por tienda (panel + historial individual) ---------- */
+/* Búsqueda de tienda tolerante: ignora mayúsculas, acentos, espacios y signos ("PE504" = "PE 504" = "Tienda PE504 Jockey"). Solo lee datos. */
+function compactKey(n){return storeKey(n).replace(/[^a-z0-9]/g,'');}
+function findStores(q){
+  var h=loadHist(),kc=compactKey(q),keys=Object.keys(h.stores),ex=[],part=[];
+  if(!kc)return [];
+  keys.forEach(function(k){
+    var a=compactKey(k),b=compactKey(h.stores[k].name||'');
+    if(a===kc||b===kc)ex.push(k);
+    else if(kc.length>=3&&(a.indexOf(kc)>=0||b.indexOf(kc)>=0))part.push(k);
+  });
+  return ex.concat(part);
+}
+function hdoSearch(q){
+  var kc=compactKey(q),h=loadHist();
+  H.q=q;H.open=null;H.cmp=false;H.sel=[];H.confirmDel=false;H.f=newH().f;H.cands=null;H.store=null;
+  if(!kc){H.msg={t:'err',s:'Escribe el nombre o código de la tienda.'};render(true);return;}
+  var f=findStores(q);
+  if(!f.length)H.msg={t:'err',s:'No se encontró ninguna tienda con "'+q.trim()+'" en este dispositivo. Revisa cómo la escribiste al evaluar (nombre o código) o usa VER TIENDAS GUARDADAS.'};
+  else if(f.length===1){H.store=f[0];var n=h.stores[f[0]].evals.length;H.msg={t:n?'ok':'info',s:n?'Tienda encontrada: '+h.stores[f[0]].name+' · '+n+' evaluación(es).':'La tienda existe pero no tiene evaluaciones guardadas.'};}
+  else{H.cands=f;H.msg={t:'info',s:'Se encontraron '+f.length+' tiendas. Elige una.'};}
+  render(true);
+}
+function hCandsHTML(h){
+  if(!H.cands)return '';
+  return '<div class="cards">'+H.cands.map(function(k){var st=own(h.stores,k);if(!st)return '';
+    return '<button class="hrow" data-a="hpick" data-v="'+esc(k)+'"><span><b>'+esc(st.name)+'</b><small>'+st.evals.length+' evaluación(es)</small></span></button>';}).join('')+'</div>';
+}
+function hMsgHTML(){
+  if(!H.msg)return '';
+  var c=H.msg.t==='err'?'var(--err)':H.msg.t==='ok'?'var(--teal-deep)':'inherit';
+  return '<p class="note" role="status" aria-live="polite" style="font-weight:600;color:'+c+'">'+esc(H.msg.s)+'</p>';
+}
 function histFiltered(){
   var f=H.f,q=storeKey;
   return H.metas.filter(function(m){
@@ -994,10 +1026,11 @@ function cmpHTML(){
 }
 function histScreen(){
   var h=loadHist(),o='<section class="wrap"><h1 class="h2">Seguimiento por tienda</h1>'+
-   '<p class="note">Por privacidad no se muestra una lista de tiendas. Escribe el nombre de la tienda para ver solo sus evaluaciones. Los datos están únicamente en este navegador y dispositivo.</p>'+
+   '<p class="note">Escribe el nombre o código de la tienda para ver sus evaluaciones. Los datos están únicamente en este navegador y dispositivo.</p>'+
    (STORE_OK?'':'<div class="fb no">'+I('alert',32)+'<div><h3>No se puede guardar</h3><p>Este navegador bloquea el almacenamiento (¿modo privado?).</p></div></div>')+
-   '<div class="panel"><label class="fld"><span class="lbl">Nombre de la tienda</span><input class="in" id="hq" value="'+esc(H.q)+'" placeholder="Tienda" autocomplete="off" autocapitalize="words"></label></div>'+
-   '<div><button class="btn" data-a="hsearch">'+I('search',24)+'BUSCAR</button></div>';
+   '<div class="panel"><label class="fld"><span class="lbl">Nombre o código de la tienda</span><input class="in" id="hq" value="'+esc(H.q)+'" placeholder="Ej. PE504" autocomplete="off" autocapitalize="words" autocorrect="off" spellcheck="false" enterkeyhint="search"></label></div>'+
+   '<div style="display:flex;flex-wrap:wrap;gap:12px"><button class="btn" data-a="hsearch">'+I('search',24)+'BUSCAR</button><button class="btn ghost" data-a="hall">VER TIENDAS GUARDADAS</button></div>';
+  o+=hMsgHTML()+hCandsHTML(h);
   if(H.store==null)return o+'</section>';
   var st=own(h.stores,H.store);
   if(!st||!st.evals.length){H.metas=[];return o+'<p class="lead">No hay evaluaciones guardadas para esa tienda.</p></section>';}
@@ -1482,10 +1515,21 @@ var A={
  openHist:function(){H=newH(S.screen);if(S.started)upsertHist();go('hist');},
  openBackup:function(){H=newH(S.screen);IMP=null;if(S.started)upsertHist();go('backup');},
  openFlyer:function(){go('flyer');},
- hsearch:function(){
-   var i=document.getElementById('hq'),q=i?i.value:'',k=storeKey(q);
-   if(!k){toast('Escribe el nombre de la tienda');return;}
-   H.q=q;H.store=k;H.open=null;H.cmp=false;H.sel=[];H.confirmDel=false;H.f=newH().f;render(true);
+ hsearch:function(el){
+   if(H.busy)return;H.busy=1;
+   var b=(el&&el.tagName==='BUTTON')?el:document.querySelector('[data-a="hsearch"]');
+   if(b){b.disabled=true;b.setAttribute('aria-busy','true');if(b.lastChild&&b.lastChild.nodeType===3)b.lastChild.nodeValue='BUSCANDO…';}
+   var i=document.getElementById('hq'),q=i?i.value:'';
+   setTimeout(function(){H.busy=0;hdoSearch(q);},150);
+ },
+ hpick:function(el){
+   var st=own(loadHist().stores,el.dataset.v);if(!st)return;
+   H.store=el.dataset.v;H.cands=null;H.open=null;H.q=st.name;H.msg={t:'ok',s:'Tienda seleccionada: '+st.name+' · '+st.evals.length+' evaluación(es).'};render(true);
+ },
+ hall:function(){
+   var k=Object.keys(loadHist().stores);H.store=null;H.open=null;H.cmp=false;H.sel=[];H.cands=k.length?k:null;
+   H.msg=k.length?{t:'info',s:k.length+' tienda(s) con evaluaciones guardadas en este dispositivo.'}:{t:'err',s:'No hay evaluaciones guardadas en este dispositivo. Si realizaste entrenamientos en otro navegador, dispositivo o dirección web, los datos están allí.'};
+   render(true);
  },
  hkpi:function(el){H.f.estado=H.f.estado===el.dataset.v?'':el.dataset.v;render(true);},
  hclear:function(){H.f=newH().f;render(true);},
